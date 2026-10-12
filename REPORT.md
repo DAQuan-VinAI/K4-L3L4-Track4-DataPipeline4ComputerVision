@@ -4,15 +4,15 @@
 
 | | |
 |---|---|
-| Họ và tên | `<điền>` |
-| MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `<điền>` |
-| GitHub | `<điền: tên tài khoản>` |
-| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `<điền: trip-xxxxx>` |
+| Họ và tên | Đoàn Anh Quân |
+| MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | 202602803 |
+| GitHub | https://github.com/DAQuan-VinAI/K4-L3L4-Track4-DataPipeline4ComputerVision |
+| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | trip-04868 |
 
 ## Kết quả cuối
 
-- `dataset_version` của bạn: `<điền>`  (phải khớp `report/evidence/run_summary.json`)
-- Số khung hình train / val / test của bạn: `<điền>`
+- `dataset_version` của bạn: `72d089019416`  (phải khớp `report/evidence/run_summary.json`)
+- Số khung hình train / val / test của bạn: 720 / 174 / 126 (tổng 1020; 18 / 4 / 4 trip)
 - `report/verify.txt`: tạo bằng `python3 scripts/check_submission.py --save-verify` (phải có `27/27 checks passed`).
 - Ảnh chụp trong `report/screenshots/`: `airflow_graph.png`, `minio_lake.png`, `metabase_dashboard.png`, và ảnh bài tập sập/chạy lại (log task đỏ thấy trip của bạn).
 
@@ -21,7 +21,15 @@
 ### Câu 1
 Liệt kê **ít nhất 4 khác biệt** giữa telemetry nguồn A và nguồn B mà bạn thấy ở bronze. Vì sao pipeline giữ **mỗi nguồn một bảng bronze** và để mọi cột ở dạng chữ, thay vì gộp và ép kiểu ngay?
 
-(trả lời ở đây)
+Khác biệt giữa hai nguồn nhìn thấy ở bronze (2 dòng đầu mỗi bảng):
+
+1. **Tên cột khác hẳn**: A dùng `ts_utc, speed_mps, heading_deg, lat, lon, alt_m, acc_x, acc_y, gas, brake, steer`; B dùng `timestamp_ms, spd_kmh, hdg, latitude, longitude, altitude, ax, ay, throttle_pct, brake_pct, steering`.
+2. **Đơn vị tốc độ**: A là m/s (`1.213`), B là km/h (`55.11`).
+3. **Kiểu timestamp**: A là chuỗi ISO UTC (`2025-10-07T08:00:00.014Z`), B là epoch mili giây (`1759933801509`).
+4. **Bàn đạp**: A là tỉ lệ 0..1 (`gas = 0.028`), B là phần trăm (`throttle_pct = 2.0`).
+5. **Đồng hồ**: `bronze.video_files` ghi `telemetry_clock_offset_ms` = 0 cho drive_a và 1500 cho drive_b, tức đồng hồ thiết bị B chạy lệch 1,5 giây so với video.
+
+Giữ mỗi nguồn một bảng và để mọi cột dạng chữ vì bronze là bản sao nguyên trạng của nguồn: nếu gộp và ép kiểu ngay thì phải quyết định sớm về đơn vị, múi giờ, ô trống, và một dòng không ép được sẽ bị mất hoặc làm hỏng cả lần nạp. Để nguyên thì khi luật làm sạch sai, mình sửa ở silver rồi chạy lại từ bronze mà không cần xin lại dữ liệu gốc. Bronze của tôi có 3021 dòng (A) và 3234 dòng (B), đúng bằng số dòng CSV, và `bronze.raw_telemetry_a` chỉ có một commit (version 0, 3021 dòng) dù đã nạp hai lần.
 
 ## Bước 2 · Silver telemetry
 
@@ -47,9 +55,9 @@ Khung hình **đen** và khung hình **tối** khác nhau thế nào, pipeline x
 
 | dHash khác tối đa | số khung trùng, drive A | số khung trùng, drive B |
 |---|---|---|
-| 0 | | |
-| 2 | | |
-| 6 | | |
+| 0 | 60 | 8 |
+| 2 | 149 | 52 |
+| 6 | 363 | 244 |
 
 (trả lời ở đây)
 
