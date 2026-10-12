@@ -153,4 +153,8 @@ Thẻ "Top 10 trips by frame drop rate" trả lời câu hỏi vận hành: trip
 
 Điều bạn thấy bất ngờ nhất, điều gì còn chưa rõ, và một lỗi dữ liệu mà bạn nghĩ pipeline **chưa** bắt được (nếu có). Tối đa 8 dòng.
 
-(trả lời ở đây)
+Bất ngờ nhất là sau khi clear task đỏ, Airflow không tự chạy lại 7 task `upstream_failed`; tôi phải clear tiếp `dbt_run_silver` kèm Downstream thì DAG mới xanh. Bất ngờ thứ hai là chỉ đổi MSSV (tôi gõ nhầm `2A202602803` rồi sửa thành `202602803`) mà `dataset_version` và số khung mỗi split đổi hẳn, trong khi bốn thí nghiệm cho số y như cũ.
+
+Chưa rõ: vì sao `trip-04622` chạy nhanh (67,1 km/h) mà vẫn bị loại 56,7% khung; tôi chưa tra lý do theo từng trip. Tôi cũng chưa hiểu vì sao `bronze.video_files` ở version 1 trong khi các bảng bronze khác ở version 0.
+
+Lỗi dữ liệu tôi nghĩ pipeline chưa bắt: chỉ `speed_mps` có test `in_range`, còn GPS, hướng (`heading_deg`), gia tốc và bàn đạp không có test nào, nên một toạ độ nhảy vọt hay góc hướng ngoài 0–360 sẽ lọt xuống gold. Ngoài ra đoạn camera đứng hình ở drive A chỉ bắt được 11/12 khung theo `verify`.
