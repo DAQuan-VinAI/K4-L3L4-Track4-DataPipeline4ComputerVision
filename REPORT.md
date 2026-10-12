@@ -115,18 +115,39 @@ Ba tháng sau, để tái tạo đúng dataset cần: sha256 của hai video (x�
 ### Câu 9
 Mô tả chính xác điều xảy ra khi trip của bạn sập rồi chạy lại: bao nhiêu task chuyển đỏ, bao nhiêu task `upstream_failed`, bạn clear gì, dữ liệu có nhân đôi không, `dataset_version` có đổi không? Bằng chứng (ảnh, số) là gì?
 
-(trả lời ở đây)
+Trip của tôi là `trip-04868` (= 202602803 mod 26, vị trí 13 trong danh sách trip). Với `LAB_FAIL_ONCE=trip-04868`, run `crash_trip_04868` của DAG kết thúc ở trạng thái failed với: **1 task đỏ** (`silver_frames`, map index 13; log có dòng `RuntimeError: simulated crash while extracting trip-04868; run it again`), **7 task `upstream_failed`** (`dbt_run_silver`, `dbt_test_silver`, `dbt_run_gold`, `dbt_test_gold`, `publish_lake`, `export_dataset`, `publish_warehouse`) và 29 task success.
+
+Tôi clear đúng task đỏ đó: chỉ **một** trip được trích xuất lại, 25 task `silver_frames` còn lại không chạy lại. Điều tôi không ngờ là 7 task `upstream_failed` không tự chạy theo, nên tôi phải clear thêm `dbt_run_silver` kèm Downstream; sau đó cả 37/37 task xanh.
+
+Dữ liệu không nhân đôi: `silver.frames` có 1246 dòng và 1246 `frame_id` khác nhau, bằng đúng lần chạy không sập; lịch sử Delta cho thấy commit cuối (version 25) là `WRITE` 60 dòng với predicate `trip_id = 'trip-04868'`. `dataset_version` vẫn là `72d089019416` và `verify` vẫn 27/27 (`report/verify.txt`). Ảnh: `report/screenshots/crash_task_log.png` (log đỏ) và `crash_rerun_green.png` (Graph xanh sau khi clear).
 
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?
 
-(trả lời ở đây)
+Hiện tại pipeline xử lý 2 drive, 26 trip, 1246 khung, khoảng 1 phút cho cả DAG. Lên 500 xe mỗi ngày thì tôi nghĩ ba chỗ vỡ trước:
+
+1. **Giải mã video bằng FFmpeg trên một máy.** Đây là bước nặng nhất (mỗi trip một task, chạy trong một container Airflow với `LocalExecutor`). Thay bằng cụm worker xử lý song song theo partition (Spark, Ray hoặc batch job trên Kubernetes), giải mã bằng GPU nếu cần, và chỉ xử lý partition mới.
+2. **dbt + DuckDB một node.** DuckDB chạy trong một tiến trình với một file `lakehouse.duckdb`; khi bảng telemetry lên hàng tỉ dòng và nhiều người cùng chạy thì không còn vừa bộ nhớ và không chạy đồng thời được. Thay bằng engine phân tán đọc thẳng Delta (Spark, Trino), vẫn giữ dbt để mô tả biến đổi và test.
+3. **Điều phối và lưu trữ một máy.** Airflow `LocalExecutor` và một MinIO đơn lẻ không chịu được hàng chục nghìn task mỗi ngày và không có dự phòng. Thay bằng `CeleryExecutor` hoặc `KubernetesExecutor`, object storage dạng cụm (S3 hoặc MinIO phân tán), và partition theo ngày + xe để backfill từng phần.
+
+Postgres làm warehouse cho Metabase cũng sẽ phải đổi, nhưng nó chỉ chứa các mart đã gộp nên vỡ sau cùng. Tôi chưa đo tải thật; thứ tự trên là suy luận từ cấu hình của lab.
 
 ## Câu hỏi riêng của bạn trên Metabase
 
 Câu SQL bạn thêm vào dashboard và điều nó cho biết:
 
-(trả lời ở đây)
+```sql
+select drive_id, trip_id, split,
+       round(avg_speed_kmh::numeric, 1) as avg_speed_kmh,
+       frames, frames_kept,
+       frames - frames_kept as frames_dropped,
+       round(100.0 * (frames - frames_kept) / frames, 1) as drop_pct
+from marts.mart_trip_summary
+order by drop_pct desc, trip_id
+limit 10;
+```
+
+Thẻ "Top 10 trips by frame drop rate" trả lời câu hỏi vận hành: trip nào bị loại nhiều khung nhất. Kết quả của tôi: `trip-04622` (drive_a, train) bị loại 34/60 khung = 56,7%; `trip-03904` (drive_a, test) 11/22 = 50,0%; `trip-02086` (drive_a, train) 28/60 = 46,7%; `trip-08888` (drive_a, test) 24/60 = 40,0%; `trip-07774` (drive_a, train) 13/34 = 38,2%. Sáu trip đứng đầu đều thuộc drive A, khớp với phễu khung hình: A bị loại 149 khung trùng, 9 khung mờ, 6 khung đen, còn B là 52, 0 và 4. Hai trip thuộc tập test của tôi nằm trong nhóm này, nên tập test có ít khung hơn dự kiến (126 khung). Mart này không cho biết lý do loại theo từng trip; muốn biết phải truy vấn `silver.silver_frames_flagged`.
 
 ## Nhìn lại
 
