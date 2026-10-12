@@ -36,12 +36,25 @@ Giữ mỗi nguồn một bảng và để mọi cột dạng chữ vì bronze l
 ### Câu 2
 Pipeline đưa hai nguồn về một schema như thế nào (đơn vị, kiểu thời gian, **độ lệch đồng hồ**)? Bằng chứng nào trong kết quả bước 2 cho thấy đã đúng? Dán bảng quarantine của bạn (số dòng theo từng lý do, từng drive) và giải thích vì sao dòng lỗi vào `rejects` thay vì bị xoá.
 
-(trả lời ở đây)
+Hai model staging (`stg_telemetry_a.sql`, `stg_telemetry_b.sql`) đổi tên cột về chung một bộ, đổi tốc độ của B từ km/h sang m/s, đổi epoch ms thành timestamp UTC và **trừ 1500 ms** độ lệch đồng hồ khai báo trong `sources.json`.
+
+Bằng chứng đã trừ đúng: dòng thô đầu tiên của B là `1759933801509` ms = 14:30:01.509 UTC; trong `silver_telemetry` thời điểm bắt đầu của drive_b là `2025-10-08 14:30:00.009`, khớp giờ bắt đầu video `14:30:00` (verify: "first sample within 0.5 s of video start"). Tốc độ tối đa sau khi đổi đơn vị là 71,3 km/h (A) và 100,2 km/h (B), đều hợp lý.
+
+| drive | duplicate | speed_missing | speed_out_of_range | tổng loại | sạch | nhận về |
+|---|---|---|---|---|---|---|
+| drive_a | 20 | 30 | 3 | 53 | 2968 | 3021 |
+| drive_b | 20 | 30 | 3 | 53 | 3181 | 3234 |
+
+Dòng lỗi vào `silver_telemetry_rejects` kèm `reject_reason` thay vì bị xoá để phép cộng luôn khớp (2968 + 53 = 3021; 3181 + 53 = 3234), để sau này tra được vì sao một dòng bị loại, và để nếu luật sai (ví dụ ngưỡng tốc độ quá chặt) thì còn dữ liệu mà khôi phục.
 
 ### Câu 3
 Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả thí nghiệm `break-gate` của bạn (`break_gate.json`): test nào bắt được, bao nhiêu dòng, và điều đó cho biết gì về vai trò của "cổng chất lượng"?
 
-(trả lời ở đây)
+`max_gap_ms` (khoảng trống giữa hai mẫu > 1000 ms) là `warn` vì cảm biến mất tín hiệu là khiếm khuyết đã biết của dữ liệu thật: nó không làm sai các dòng còn lại, và bước sau đã tự xử lý bằng cờ `sync_lost` (7 khung mỗi drive mất đồng bộ bị loại). Dừng cả pipeline vì chuyện này là quá tay. Lần chạy của tôi test này báo WARN với 2 kết quả. Ngược lại `in_range` trên `speed_mps` (0..70 m/s) là `error` vì một tốc độ vô lý là dữ liệu **sai**: nếu lọt xuống gold nó thành nhãn sai cho mô hình.
+
+Thí nghiệm `break_gate.json`: nới `max_speed_mps` từ 70 lên 1000 thì `dbt test` cho `PASS=5 WARN=1 ERROR=1`, test `in_range_silver_telemetry_speed_mps__70__0` bắt được **6 dòng** (đúng bằng 3 + 3 dòng `speed_out_of_range` của hai drive, lúc này đã lọt vào silver). Khôi phục luật gốc thì về `PASS=6 WARN=1 ERROR=0`.
+
+Điều này cho thấy cổng chất lượng là lớp kiểm tra **độc lập với luật làm sạch**: khi ai đó nới nhầm luật ở tầng biến đổi, test vẫn chặn được và các task phía sau trong DAG không chạy, nên dữ liệu xấu không tới gold.
 
 ## Bước 3 · Silver frames
 
