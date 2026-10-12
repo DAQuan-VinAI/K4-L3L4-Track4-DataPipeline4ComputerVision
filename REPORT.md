@@ -85,17 +85,30 @@ Ngưỡng phụ thuộc tốc độ xe: lấy mẫu 2 khung/giây, xe chạy ch�
 ### Câu 6
 Dựa vào `leakage.json`: chia theo khung hình làm bao nhiêu trip bị chia cắt, so với chia theo trip? Vì sao điều này làm điểm kiểm thử đẹp một cách giả tạo?
 
-(trả lời ở đây)
+Theo `leakage.json`: có 1020 khung đáng dùng thuộc 26 trip. Chia ngẫu nhiên **theo khung hình** (70/15/15) thì **26/26 trip** nằm ở nhiều hơn một split, và cả 26 trip đều có khung ở **cả train lẫn test**. Chia **theo trip** như gold của pipeline thì **0 trip** bị chia cắt (test `no_straddle` trong `schema.yml` giữ điều này).
+
+Điểm kiểm thử đẹp giả tạo vì các khung liền nhau trong một trip cách nhau 0,5 giây: cùng con đường, cùng xe phía trước, cùng ánh sáng. Nếu khung thứ n ở train và khung n+1 ở test thì mô hình gần như đã thấy đề thi, nó chỉ cần nhớ cảnh chứ không cần tổng quát hoá. Điểm test khi đó đo khả năng ghi nhớ, và sẽ tụt khi gặp một con đường mới thật sự. Chia theo trip buộc tập test là những cảnh mô hình chưa từng thấy. Lab này không huấn luyện mô hình nên tôi không có con số chênh lệch độ chính xác, chỉ có số trip bị rò rỉ.
 
 ### Câu 7
 Vì sao `dataset_version` là **băm nội dung** chứ không phải ngày giờ hay số đếm? Hai lần chạy liên tiếp cho kết quả gì? Vì sao `dataset_version` của bạn **khác** bạn bè dù cùng dữ liệu (liên hệ MSSV)?
 
-(trả lời ở đây)
+`dataset_version` là băm nội dung (12 ký tự) vì cái cần định danh là **dataset chứa gì**, không phải nó được tạo lúc nào. Dùng ngày giờ hay số đếm thì hai lần chạy cho cùng dữ liệu vẫn ra hai tên khác nhau, còn hai dataset khác nhau có thể bị gán nhầm tên; băm nội dung thì cùng nội dung luôn cùng phiên bản, đổi một khung hay một nhãn split là đổi phiên bản.
+
+Hai lần chạy liên tiếp của tôi cho cùng kết quả: `scripts/lab.sh step all --reset` ra `72d089019416`; sau đó tôi xoá lake và chạy lại toàn bộ bằng DAG Airflow (kể cả lần có task bị sập) thì `verify` vẫn báo `72d089019416` dù `created_at` khác.
+
+Phiên bản của tôi khác bạn bè vì `gold_dataset_frames.sql` xếp thứ tự trip bằng `md5(trip_id || LAB_STUDENT_ID)`: MSSV khác thì trip rơi vào split khác, nên nội dung dataset khác và băm khác. Tôi đã thấy trực tiếp: lúc đầu tôi đặt nhầm MSSV thành `2A202602803` thì ra `098e893c749c` với 705/160/155 khung; sửa lại `202602803` thì ra `72d089019416` với 720/174/126 khung. Số trip mỗi split (18/4/4) và tổng 1020 khung không đổi.
 
 ### Câu 8
 Đọc phần `lineage` trong `manifest.json` của dataset bạn. Trả lời "dataset này được tạo từ dữ liệu nào?" bằng chính nội dung đó. Nếu một người hỏi 3 tháng sau, thông tin nào giúp tái tạo lại đúng dataset này?
 
-(trả lời ở đây)
+Phần `lineage` trong `gold/datasets/72d089019416/manifest.json` của tôi ghi:
+
+- phiên bản các bảng Delta đầu vào: `bronze.raw_telemetry_a` = 0, `bronze.raw_telemetry_b` = 0, `bronze.trips_raw` = 0, `bronze.video_files` = 1, `silver.frames` = 25, `silver.telemetry` = 0, `silver.frames_flagged` = 0, `silver.frame_telemetry` = 0;
+- `input_video_sha256`: drive_a = `636ba1a98dfc5ba6…`, drive_b = `bfa62703f645ff77…`.
+
+Tức dataset này tạo từ đúng hai file video có sha256 đó, qua các bảng ở đúng những phiên bản đó. `silver.frames` ở version 25 vì mỗi trip là một commit (26 trip, version 0 đến 25). Manifest còn ghi luật: loại `is_black, is_blurry, is_near_dup, not sync_ok`; split "per trip, stratified by drive, md5 order"; kết quả 1020 khung (drive_a 436, drive_b 584).
+
+Ba tháng sau, để tái tạo đúng dataset cần: sha256 của hai video (xác nhận đúng dữ liệu gốc), phiên bản từng bảng Delta (time travel về đúng trạng thái), các luật và tham số trong `dbt_project.yml` (ngưỡng, tỉ lệ split 0,70/0,15), MSSV `202602803` dùng làm muối chia split, và mã nguồn ở đúng commit git. Cuối cùng so `dataset_version` và `manifest_sha256` (`9389417c…`) để xác nhận kết quả trùng khớp.
 
 ## Bước 5 · Điều phối và phục vụ
 
